@@ -4,55 +4,80 @@ import time
 from PIL import Image
 
 heightmap = None
+wetmap = None
 
 # how many km is the map across
 mapsize = 28
 
 # total km range in heights on the map image
-heightscale = 0.27432
+heightscale = .3
 
 # extra multiplier to penalize elevation changes even more
 # don't take this too high or it can't make a path, but if it's too low it will take a straight shot
-elevation_weight = 80
+elevation_weight = 1
 
 def go():
-    global heightmap
+    global heightmap, wetmap
 
     # open the image
     with Image.open("sc.tif") as img:
+        with Image.open("sc_water.tif") as img_water:
 
-        # create the final rendering of the terrain
-        result = to3DImage(img)
+            # load in the heightmap
+            heightmap = Heightmap(img)
 
-        # load in the heightmap
-        heightmap = Heightmap(img)
+            # load in the wetmap
+            wetmap = Wetmap(img_water)
 
-        # perform the computation
-        start = time.time()
-        path = astar(heightmap, Node(heightmap.width, 78*4, 179*4), Node(heightmap.width, 181*4, 87*4))
-        end = time.time()
+            # create the final rendering of the terrain
+            result = to3DImage(img, wetmap)
 
-        # open up result pixels for writing
-        pixels = result.load()
+            bestpath = None
+            bestlength = math.inf
 
-        # draw the path
-        for c in path:
-            coords = idToCoords(heightmap.width, c)
+            for starty in range(0,heightmap.height,10):
 
-            # draw with a 3x3 kernel
-            for i in range(coords[0] - 1, coords[0] + 2):
-                for j in range(coords[1] - 1, coords[1] + 2):
-                    pixels[i, j] = (255, 0, 0)
+                print("Computing @ "+str(starty))
 
-        # show the final image
-        result.show()
+                # perform the computation
+                path, length = astar(heightmap, wetmap, starty)
 
-        # print duration
-        print("Took "+str(end-start)+" sec")
+                if length < bestlength:
+                    bestpath = path
+                    bestlength = length
+
+            # open up result pixels for writing
+            pixels = result.load()
+
+            print(length)
+
+            # draw the path
+            for c in bestpath:
+                coords = idToCoords(heightmap.width, c)
+
+                # draw with a 3x3 kernel
+                for i in range(coords[0] - 1, coords[0] + 2):
+                    for j in range(coords[1] - 1, coords[1] + 2):
+                        if 0 <= i < heightmap.width and 0 <= j < heightmap.width:
+                            pixels[i, j] = (255, 0, 0)
+
+            # show the final image
+            result.show()
+
+            # print duration
+            # print("Took "+str(end-start)+" sec")
 
 # cost function from any start coordinate to any end coordinate
-def g(hm, start, end):
-    return hm.get3DDistance(start.x, start.y, end.x, end.y)
+def cost(hm, wm, start, end):
+
+    cst = hm.get3DDistance(start.x, start.y, end.x, end.y) + 50 * abs(hm.getElevation(start.x, start.y) - hm.getElevation(end.x, end.y))
+    if wm.isWet(end.x, end.y):
+        cst *= 1000
+    return cst
+
+# estimate remaining distance from a given point to the right side of the world
+def estimate(hm, wm, current):
+    return 1.41*hm.get3DDistance(current.x, current.y, hm.width-1, current.y)
 
 # trace the path from end to start
 def buildPath(origins, current):
@@ -66,24 +91,29 @@ def idToCoords(hmw, id):
     return (id % hmw, id // hmw)
 
 # convert the heightmap into a more realistic representation of the terrain
-def to3DImage(img):
+def to3DImage(img, wetmap):
     result = Image.new('RGB', (img.width, img.height), "black")
     pixels = result.load()
     for y in range(img.height):
         for x in range(0,img.width-1):
-            offset = 20*(img.getpixel((x+1,y)) - img.getpixel((x,y)))
-            offset = min(offset, 40)
-            color = (167 + offset, 197 + offset, 168 + offset)
+            if wetmap.isWet(x, y):
+                pixels[x, y] = (117, 178, 253)
+            else:
+                offset = 20*(img.getpixel((x+1,y)) - img.getpixel((x,y)))
+                offset = min(offset, 40)
+                color = (167 + offset, 197 + offset, 168 + offset)
 
-            pixels[x,y] = color
+                pixels[x,y] = color
     return result
 
 
-def astar(hm, start, goal):
+def astar(hm, wm, starty):
+
+    start = Node(hm.width, 0, starty)
 
     # create the heap
     heap = []
-    heapq.heappush(heap, (g(hm, start, goal), start))
+    heapq.heappush(heap, (estimate(hm, wm, start), start))
 
     # stores where each reached cell was reached from
     origins = {}
@@ -92,21 +122,21 @@ def astar(hm, start, goal):
     gs = {start.id: 0}
 
     # stores f-scores (g + estimate weight to end)
-    fs = {start.id: g(hm, start, goal)}
+    fs = {start.id: estimate(hm, wm, start)}
 
     while len(heap) > 0:
         # gets the node with lowest f-score from the heap
         current = heapq.heappop(heap)[1]
 
         # if reached the goal
-        if current.id == goal.id:
-            return buildPath(origins, current.id)
+        if current.x == hm.width-1:
+            return buildPath(origins, current.id), gs[current.id]
 
         # iterate through the (usually) 8 neighboring cells
         neighbors = current.getNeighbors()
         for neighbor in neighbors:
             # compute new g score
-            tg = gs[current.id] + g(hm, current, neighbor)
+            tg = gs[current.id] + cost(hm, wm, current, neighbor)
 
             # if it's better than the current best g-score or is the first occurrence of that node, record it
             if tg < gs.get(neighbor.id, math.inf):
@@ -118,7 +148,7 @@ def astar(hm, start, goal):
                 gs[neighbor.id] = tg
 
                 # compute f-score
-                fs[neighbor.id] = gs[neighbor.id] + g(hm, neighbor, goal)
+                fs[neighbor.id] = gs[neighbor.id] + estimate(hm, wm, neighbor)
 
                 # add it to the heap for processing
                 if (fs[neighbor.id], neighbor) not in heap:
@@ -137,7 +167,18 @@ class Heightmap:
 
     # gets the pythagorean distance between 2 coordinates, factoring in elevation as well.
     def get3DDistance(self, x1, y1, x2, y2):
+        # print(self.getElevation(x1, y1) - self.getElevation(x2, y2))
         return (x1-x2) ** 2 + (y1-y2) ** 2 + (elevation_weight*(self.getElevation(x1, y1) - self.getElevation(x2, y2))) ** 2
+
+class Wetmap:
+    def __init__(self, img):
+        self.img = img
+        self.width = img.width
+        self.height = img.height
+        self.km_per_pix = mapsize / img.width
+
+    def isWet(self, x, y):
+        return self.img.getpixel((x,y))/255 > 0.5
 
 class Node:
     def __init__(self, hmw, x, y):
