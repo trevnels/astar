@@ -7,7 +7,7 @@ heightmap = None
 wetmap = None
 
 # how many km is the map across
-mapsize = 28
+mapsize = 21
 
 # total km range in heights on the map image
 heightscale = .3
@@ -35,6 +35,9 @@ def go():
             bestpath = None
             bestlength = math.inf
 
+            # open up result pixels for writing
+            pixels = result.load()
+            # draw the optimal paths
             for starty in range(0,heightmap.height,10):
 
                 print("Computing @ "+str(starty))
@@ -42,16 +45,14 @@ def go():
                 # perform the computation
                 path, length = astar(heightmap, wetmap, starty)
 
+                for c in path:
+                    coords = idToCoords(heightmap.width, c)
+                    pixels[coords[0], coords[1]] = (255, 128, 0)
+
                 if length < bestlength:
                     bestpath = path
                     bestlength = length
 
-            # open up result pixels for writing
-            pixels = result.load()
-
-            print(length)
-
-            # draw the path
             for c in bestpath:
                 coords = idToCoords(heightmap.width, c)
 
@@ -60,6 +61,8 @@ def go():
                     for j in range(coords[1] - 1, coords[1] + 2):
                         if 0 <= i < heightmap.width and 0 <= j < heightmap.width:
                             pixels[i, j] = (255, 0, 0)
+
+
 
             # show the final image
             result.show()
@@ -70,14 +73,26 @@ def go():
 # cost function from any start coordinate to any end coordinate
 def cost(hm, wm, start, end):
 
-    cst = hm.get3DDistance(start.x, start.y, end.x, end.y) + 50 * abs(hm.getElevation(start.x, start.y) - hm.getElevation(end.x, end.y))
+    cst = 0.1 * hm.get3DDistance(start.x, start.y, end.x, end.y) + 80 * abs(hm.getElevation(start.x, start.y) - hm.getElevation(end.x, end.y))
     if wm.isWet(end.x, end.y):
-        cst *= 1000
+        cst *= 1.5
     return cst
 
 # estimate remaining distance from a given point to the right side of the world
 def estimate(hm, wm, current):
-    return 1.41*hm.get3DDistance(current.x, current.y, hm.width-1, current.y)
+    return cost(hm, wm, Node(hm.width, current.x, current.y), Node(hm.width, hm.width-1, current.y))
+    # this is too laggy
+    """accum = 0
+    x1 = current.x
+    x2 = hm.width-1
+    y1 = current.y
+    y2 = current.y
+    for i in range(3):
+        t = i / 3
+        accum += cost(hm, wm, Node(hm.width, lerp(x1, x2, t), lerp(y1, y2, t)), Node(hm.width, lerp(x1, x2, t+0.3333), lerp(y1, y2, t+0.3333)))
+    # print(accum)
+    return accum"""
+
 
 # trace the path from end to start
 def buildPath(origins, current):
@@ -128,6 +143,8 @@ def astar(hm, wm, starty):
         # gets the node with lowest f-score from the heap
         current = heapq.heappop(heap)[1]
 
+        # print(current.x, current.y)
+
         # if reached the goal
         if current.x == hm.width-1:
             return buildPath(origins, current.id), gs[current.id]
@@ -139,7 +156,9 @@ def astar(hm, wm, starty):
             tg = gs[current.id] + cost(hm, wm, current, neighbor)
 
             # if it's better than the current best g-score or is the first occurrence of that node, record it
-            if tg < gs.get(neighbor.id, math.inf):
+            if tg < gs.get(neighbor.id, math.inf) - 10:
+
+                # print(tg, gs.get(neighbor.id, math.inf))
 
                 # set new origin for the neighbor
                 origins[neighbor.id] = current.id
@@ -169,6 +188,9 @@ class Heightmap:
     def get3DDistance(self, x1, y1, x2, y2):
         # print(self.getElevation(x1, y1) - self.getElevation(x2, y2))
         return (x1-x2) ** 2 + (y1-y2) ** 2 + (elevation_weight*(self.getElevation(x1, y1) - self.getElevation(x2, y2))) ** 2
+
+def lerp(a, b, t):
+    return a + (b-a) * t
 
 class Wetmap:
     def __init__(self, img):
