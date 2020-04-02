@@ -14,7 +14,7 @@ heightscale = .3
 
 # extra multiplier to penalize elevation changes even more
 # don't take this too high or it can't make a path, but if it's too low it will take a straight shot
-elevation_weight = 1
+elevation_weight = 60
 
 def go():
     global heightmap, wetmap
@@ -73,14 +73,14 @@ def go():
 # cost function from any start coordinate to any end coordinate
 def cost(hm, wm, start, end):
 
-    cst = 0.1 * hm.get3DDistance(start.x, start.y, end.x, end.y) + 80 * abs(hm.getElevation(start.x, start.y) - hm.getElevation(end.x, end.y))
+    cst = hm.get3DDistance(start.x, start.y, end.x, end.y) #+ 80 * abs(hm.getElevation(start.x, start.y) - hm.getElevation(end.x, end.y))
     if wm.isWet(end.x, end.y):
-        cst *= 1.5
+        cst *= 100
     return cst
 
 # estimate remaining distance from a given point to the right side of the world
 def estimate(hm, wm, current):
-    return cost(hm, wm, Node(hm.width, current.x, current.y), Node(hm.width, hm.width-1, current.y))
+    return hm.get3DDistance(current.x, current.y, hm.width-1, current.y)
     # this is too laggy
     """accum = 0
     x1 = current.x
