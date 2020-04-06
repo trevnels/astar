@@ -73,7 +73,7 @@ def go():
 # cost function from any start coordinate to any end coordinate
 def cost(hm, wm, start, end):
 
-    cst = hm.get3DDistance(start.x, start.y, end.x, end.y) #+ 80 * abs(hm.getElevation(start.x, start.y) - hm.getElevation(end.x, end.y))
+    cst = hm.get3DDistance(start.x, start.y, end.x, end.y)
     if wm.isWet(end.x, end.y):
         cst *= 100
     return cst
@@ -81,18 +81,6 @@ def cost(hm, wm, start, end):
 # estimate remaining distance from a given point to the right side of the world
 def estimate(hm, wm, current):
     return hm.get3DDistance(current.x, current.y, hm.width-1, current.y)
-    # this is too laggy
-    """accum = 0
-    x1 = current.x
-    x2 = hm.width-1
-    y1 = current.y
-    y2 = current.y
-    for i in range(3):
-        t = i / 3
-        accum += cost(hm, wm, Node(hm.width, lerp(x1, x2, t), lerp(y1, y2, t)), Node(hm.width, lerp(x1, x2, t+0.3333), lerp(y1, y2, t+0.3333)))
-    # print(accum)
-    return accum"""
-
 
 # trace the path from end to start
 def buildPath(origins, current):
